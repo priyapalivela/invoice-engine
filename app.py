@@ -1,6 +1,3 @@
-I'll add all the requested improvements to your TrackBook application. Here's the complete enhanced version with all features:
-
-```python
 """
 TrackBook — Invoice Intelligence Engine (Enhanced)
 NxtWave · nxtwave.ca
