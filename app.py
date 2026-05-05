@@ -779,11 +779,30 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
     st.divider()
-    st.caption("NAVIGATION")
-    st.markdown("📤 **Extract invoices**")
-    st.markdown("📷 Receipt scan")
-    st.markdown("📋 History")
-    st.markdown("📊 Summary")
+    
+    st.markdown("### NAVIGATION")
+    
+    # These buttons will change the active tab using session state
+    if st.button("📤 Extract Invoices", use_container_width=True, 
+                 type="primary" if st.session_state.active_tab == "Extract" else "secondary"):
+        st.session_state.active_tab = "Extract"
+        st.rerun()
+    
+    if st.button("📷 Scan Receipt", use_container_width=True,
+                 type="primary" if st.session_state.active_tab == "Scan" else "secondary"):
+        st.session_state.active_tab = "Scan"
+        st.rerun()
+    
+    if st.button("📋 History", use_container_width=True,
+                 type="primary" if st.session_state.active_tab == "History" else "secondary"):
+        st.session_state.active_tab = "History"
+        st.rerun()
+    
+    if st.button("📊 Spend Summary", use_container_width=True,
+                 type="primary" if st.session_state.active_tab == "Summary" else "secondary"):
+        st.session_state.active_tab = "Summary"
+        st.rerun()
+    
     st.divider()
     if db_ok:
         st.markdown('<span class="tb-badge tb-badge-green">● DB connected</span>', unsafe_allow_html=True)
@@ -1276,9 +1295,35 @@ def render_batch_results(results: list[dict], edit_mode: bool):
 if not db_ok:
     st.error(f"⚠️ Database not connected: {db_error}")
 
-tab_extract, tab_scan, tab_history, tab_summary = st.tabs(
-    ["Extract", "Scan Receipt", "History", "Spend Summary"])
+# Initialize active tab from session state if not exists
+if 'active_tab' not in st.session_state:
+    st.session_state.active_tab = "Extract"
 
+# Create tabs normally - they will always be in the same order
+tab_extract, tab_scan, tab_history, tab_summary = st.tabs(
+    ["📤 Extract", "📷 Scan Receipt", "📋 History", "📊 Spend Summary"]
+)
+# Add JavaScript to switch tabs based on session state
+if st.session_state.active_tab != "Extract":
+    tab_index = {
+        "Extract": 0,
+        "Scan": 1, 
+        "History": 2,
+        "Summary": 3
+    }.get(st.session_state.active_tab, 0)
+    
+    st.components.v1.html(f"""
+    <script>
+        // Function to click the correct tab
+        function activateTab() {{
+            const tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] button');
+            if (tabs && tabs[{tab_index}]) {{
+                tabs[{tab_index}].click();
+            }}
+        }}
+        setTimeout(activateTab, 100);
+    </script>
+    """, height=0)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — EXTRACT
