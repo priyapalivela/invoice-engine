@@ -2,3 +2,6 @@ anthropic>=0.25.0
 python-dotenv>=1.0.0
 psycopg2-binary>=2.9.0
 streamlit>=1.35.0
+Pillow
+pdf2image
+pandas
