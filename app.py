@@ -767,6 +767,24 @@ def check_auth():
 
 check_auth()
 
+# ============================================
+# INITIALIZE ALL SESSION STATE VARIABLES
+# ============================================
+if 'active_tab' not in st.session_state:
+    st.session_state.active_tab = "Extract"
+if "edit_mode" not in st.session_state:
+    st.session_state.edit_mode = False
+if "auto_save" not in st.session_state:
+    st.session_state.auto_save = True
+if "scan_edit" not in st.session_state:
+    st.session_state.scan_edit = False
+if "scan_save" not in st.session_state:
+    st.session_state.scan_save = True
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = None
+  
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
@@ -1294,10 +1312,6 @@ def render_batch_results(results: list[dict], edit_mode: bool):
 # ══════════════════════════════════════════════════════════════════════════════
 if not db_ok:
     st.error(f"⚠️ Database not connected: {db_error}")
-
-# Initialize active tab from session state if not exists
-if 'active_tab' not in st.session_state:
-    st.session_state.active_tab = "Extract"
 
 # Create tabs normally - they will always be in the same order
 tab_extract, tab_scan, tab_history, tab_summary = st.tabs(
