@@ -1612,30 +1612,38 @@ with tab_summary:
                     .head(15))
         st.bar_chart(chart_df, use_container_width=True, height=280)
 
-        # ── Invoice count chart ────────────────────────────────────────────
-        st.markdown('<div class="tb-section-head">Invoice count by vendor</div>', unsafe_allow_html=True)
-        count_df = (df[["vendor_name","invoice_count"]]
-                    .set_index("vendor_name")
-                    .sort_values("invoice_count", ascending=False)
-                    .head(15))
-        st.bar_chart(count_df, use_container_width=True, height=200)
-
-        # ── Risk analysis ──────────────────────────────────────────────────
+        # ── Risk analysis — cards only, no broken chart ────────────────────
         try:
             all_inv = get_all_invoices_for_export()
             if all_inv:
-                risk_df = pd.DataFrame(all_inv)
-                if "risk_level" in risk_df.columns:
-                    st.markdown('<div class="tb-section-head">Risk distribution</div>', unsafe_allow_html=True)
-                    risk_counts = risk_df["risk_level"].value_counts().rename_axis("Risk").reset_index(name="Count")
-                    risk_plot = risk_counts.set_index("Risk")
-                    st.bar_chart(risk_plot, use_container_width=True, height=180)
-                    rc1,rc2,rc3 = st.columns(3)
-                    for col, level, colour in [
-                        (rc1,"low","green"),(rc2,"medium","amber"),(rc3,"high","red")
-                    ]:
-                        cnt = int(risk_counts.loc[risk_counts["Risk"]==level,"Count"].sum()) if level in risk_counts["Risk"].values else 0
-                        col.markdown(f'<div class="tb-metric"><div class="tb-metric-label">{level.capitalize()} risk</div><div class="tb-metric-value">{cnt}</div></div>', unsafe_allow_html=True)
+                risk_counts = {"low": 0, "medium": 0, "high": 0}
+                for row in all_inv:
+                    lvl = (row.get("risk_level") or "low").lower()
+                    if lvl in risk_counts:
+                        risk_counts[lvl] += 1
+
+                total_risk = sum(risk_counts.values())
+                if total_risk > 0:
+                    st.markdown('<div class="tb-section-head">Fraud risk breakdown</div>', unsafe_allow_html=True)
+                    rc1, rc2, rc3 = st.columns(3)
+                    risk_cfg = [
+                        (rc1, "low",    "✅ Low risk",    "#F0FDF4", "#BBF7D0", "#15803D"),
+                        (rc2, "medium", "⚠️ Medium risk", "#FFFBEB", "#FDE68A", "#B45309"),
+                        (rc3, "high",   "🚨 High risk",   "#FFF1F2", "#FECDD3", "#B91C1C"),
+                    ]
+                    for col, level, label, bg, bd, tc in risk_cfg:
+                        cnt = risk_counts[level]
+                        pct = round(cnt / total_risk * 100) if total_risk else 0
+                        col.markdown(
+                            f'<div style="background:{bg};border:1px solid {bd};border-radius:10px;'
+                            f'padding:1rem;text-align:center">'
+                            f'<div style="font-size:0.7rem;font-weight:600;text-transform:uppercase;'
+                            f'letter-spacing:0.06em;color:{tc};margin-bottom:6px">{label}</div>'
+                            f'<div style="font-size:2rem;font-weight:800;color:{tc}">{cnt}</div>'
+                            f'<div style="font-size:0.75rem;color:{tc};opacity:0.75;margin-top:2px">{pct}% of invoices</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
         except Exception:
             pass
 
