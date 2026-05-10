@@ -1039,10 +1039,19 @@ def render_invoice(data: dict, invoice_id: int = None, editable: bool = False,
 
     render_logo_header(v.get("name"), logo_bytes)
 
+    # Combined risk: re-run enhanced checks live so header is always accurate
+    _live_extra = enhanced_fraud_flags(data) + canadian_tax_flags(data)
+    _stored_risk = (fraud or {}).get("risk_level", "low")
+    if _live_extra:
+        _n = len(_live_extra)
+        _display_risk = "high" if (_stored_risk == "high" or _n >= 3) else "medium"
+    else:
+        _display_risk = _stored_risk
+
     h1,h2,h3,h4 = st.columns(4)
     h1.markdown(f"**Confidence** {conf_badge(conf.get('overall','low'))}", unsafe_allow_html=True)
     h2.markdown(f"**Type** `{data.get('document_type','invoice')}`")
-    h3.markdown(f"**Fraud** {risk_badge((fraud or {}).get('risk_level','low'))}", unsafe_allow_html=True)
+    h3.markdown(f"**Fraud** {risk_badge(_display_risk)}", unsafe_allow_html=True)
     if invoice_id: h4.markdown(_badge(f"✓ Saved #{invoice_id}", "blue"), unsafe_allow_html=True)
 
     flagged = conf.get("flagged_fields", [])
@@ -1143,14 +1152,20 @@ def _process_single(uploaded_file, do_logo: bool, do_save: bool,
     name = uploaded_file.name
     result = {"name": name, "status": "error", "data": None,
               "logo_bytes": None, "invoice_id": None,
-              "error": None, "dup": None, "rejected": None, "thumb": None}
+              "error": None, "dup": None, "rejected": None,
+              "thumb": None, "file_bytes": None, "suffix": None}
 
     suffix = os.path.splitext(name)[1].lower()
     file_bytes = uploaded_file.getvalue()
+    result["suffix"] = suffix
 
     if tracker: tracker.update(name, 10, "processing", "Reading file…")
 
-    # PDF thumbnail
+    # Store bytes for lazy preview (capped at 20 MB to avoid memory bloat)
+    if len(file_bytes) <= 20 * 1024 * 1024:
+        result["file_bytes"] = file_bytes
+
+    # PDF thumbnail (page 1, small)
     if suffix == ".pdf":
         result["thumb"] = get_pdf_thumbnail(file_bytes)
 
@@ -1189,6 +1204,30 @@ def _process_single(uploaded_file, do_logo: bool, do_save: bool,
             result["logo_bytes"] = extract_logo(file_bytes, media_type)
         except Exception: pass
 
+    # ── Compute combined risk (Claude + enhanced + CA tax) and bake into data ──
+    _extra = enhanced_fraud_flags(data) + canadian_tax_flags(data)
+    _fraud  = data.get("fraud_flags") or {}
+    _claude_risk = _fraud.get("risk_level", "low")
+    if _extra:
+        _flag_count = len(_extra)
+        if _claude_risk == "high" or _flag_count >= 3:
+            _combined_risk = "high"
+        elif _claude_risk == "medium" or _flag_count >= 1:
+            _combined_risk = "medium"
+        else:
+            _combined_risk = "low"
+    else:
+        _combined_risk = _claude_risk
+    # Patch risk_level so DB stores the correct combined value
+    if isinstance(data.get("fraud_flags"), dict):
+        data["fraud_flags"]["risk_level"] = _combined_risk
+        data["fraud_flags"].setdefault("flags", [])
+        for f in _extra:
+            if f not in data["fraud_flags"]["flags"]:
+                data["fraud_flags"]["flags"].append(f)
+    else:
+        data["fraud_flags"] = {"risk_level": _combined_risk, "flags": _extra}
+
     result["data"] = data; result["status"] = "extracted"
 
     if do_save and not dup:
@@ -1203,13 +1242,42 @@ def _process_single(uploaded_file, do_logo: bool, do_save: bool,
     return result
 
 
+def _preview_key(name: str) -> str:
+    return f"preview_open_{name}"
+
+
+def render_file_preview(r: dict):
+    """Lazy preview — 👁 button toggles original file display."""
+    key = _preview_key(r["name"])
+    if key not in st.session_state:
+        st.session_state[key] = False
+
+    suffix = r.get("suffix", "")
+    has_preview = bool(r.get("thumb") or r.get("file_bytes"))
+    if not has_preview:
+        return
+
+    btn_label = "🙈 Hide preview" if st.session_state[key] else "👁 View original file"
+    if st.button(btn_label, key=f"prevbtn_{r['name']}"):
+        st.session_state[key] = not st.session_state[key]
+        st.rerun()
+
+    if st.session_state[key]:
+        if suffix == ".pdf" and r.get("thumb"):
+            st.image(r["thumb"], caption="Page 1 preview", width=440)
+            st.caption("📄 PDF — showing page 1 only")
+        elif r.get("file_bytes") and suffix in (".png", ".jpg", ".jpeg", ".webp"):
+            st.image(r["file_bytes"], caption=r["name"], use_container_width=True)
+        elif r.get("thumb"):
+            st.image(r["thumb"], caption="Preview", width=440)
+
+
 def render_batch_results(results: list[dict], edit_mode: bool):
     for r in results:
         icon = {"saved":"✅","extracted":"📄","rejected":"🚫","error":"❌"}.get(r["status"],"❓")
         with st.expander(f"{icon} {r['name']}", expanded=(r["status"] not in ("saved",))):
-            # PDF thumbnail
-            if r.get("thumb"):
-                st.image(r["thumb"], width=120, caption="Page 1 preview")
+
+            render_file_preview(r)
 
             if r["status"] == "rejected":
                 st.error(f"Rejected: {r['rejected']}"); continue
@@ -1233,6 +1301,13 @@ def render_batch_results(results: list[dict], edit_mode: bool):
             if r["logo_bytes"]:
                 import base64 as _b64
                 data["_logo_b64"] = _b64.b64encode(r["logo_bytes"]).decode()
+
+            # Store original file bytes so History tab can show preview later
+            import base64 as _b64
+            if r.get("thumb"):
+                data["_thumb_b64"] = _b64.b64encode(r["thumb"]).decode()
+            elif r.get("file_bytes") and r.get("suffix") in (".png",".jpg",".jpeg",".webp"):
+                data["_orig_b64"] = _b64.b64encode(r["file_bytes"]).decode()
 
             if edit_mode:
                 data = render_invoice(data, editable=True, logo_bytes=r["logo_bytes"], key_prefix=r["name"])
@@ -1551,6 +1626,22 @@ with tab_history:
                         f'border-radius:8px;padding:8px 14px;font-size:0.82rem;color:var(--primary);margin-bottom:0.75rem">'
                         f'🏢 Vendor: <strong>{vendor_name}</strong></div>',
                         unsafe_allow_html=True)
+                # Lazy preview for saved invoices — stored thumbnail or b64 image
+                hist_thumb = display_data.get("_thumb_b64")
+                hist_img   = display_data.get("_orig_b64")
+                hist_preview_key = f"hist_prev_{inv_id}"
+                if hist_thumb or hist_img:
+                    if hist_preview_key not in st.session_state:
+                        st.session_state[hist_preview_key] = False
+                    plabel = "🙈 Hide preview" if st.session_state[hist_preview_key] else "👁 View original file"
+                    if st.button(plabel, key=f"histprevbtn_{inv_id}"):
+                        st.session_state[hist_preview_key] = not st.session_state[hist_preview_key]
+                        st.rerun()
+                    if st.session_state[hist_preview_key]:
+                        if hist_thumb:
+                            st.image(_b64.b64decode(hist_thumb), caption="Page 1 preview", width=440)
+                        elif hist_img:
+                            st.image(_b64.b64decode(hist_img), caption="Original file", use_container_width=True)
                 render_invoice(display_data, inv_id, logo_bytes=logo_bytes)
             else:
                 st.error(f"No invoice found with ID {inv_id}")
