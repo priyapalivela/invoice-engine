@@ -2,34 +2,11 @@
 TrackBook — Invoice Intelligence Engine
 NxtWave · nxtwave.ca
 
-Features:
-  - TrackBook-styled UI (matches Figma reference)
-  - Per-field confidence scores with colour bars
-  - Logo extraction: images via Pillow crop, PDFs via pdf2image
-  - Concurrent batch (ThreadPoolExecutor, 3 workers, unlimited files)
-  - Canadian tax detection (HST/GST/PST per province)
-  - Enhanced fraud detection + Claude fraud_flags merged
-  - Duplicate detection with override
-  - Input validation (reject non-invoices)
-  - Edit-before-save mode
-  - History with filters + CSV export
-  - Vendor spend summary chart
-  - Camera/receipt scan
-  - Simple session-based auth
-  NEW:
-  - ClaudeAPIError + tenacity retry logic (rate limit / timeout / connection)
-  - ProgressTracker class with real-time dashboard
-  - Logo LRU cache (SHA-256 hash, 7-day disk cache, 100-item memory limit)
-  - PDF first-page thumbnail preview
-  - Batch ZIP export with summary CSV + select/deselect all
-  - Dark mode toggle (persisted via query param)
-  - Mobile-responsive CSS + device detection
-  - Risk analysis visualisation in Summary tab
-  - Print styles
-  - Accessibility focus indicators
-  - Loading animations
-  - Clean cache button
-  - Version footer
+FIXES APPLIED (v2.1):
+  FIX 1 — Fraud risk discrepancy: upgraded risk level (Claude + rules) now saved to DB
+  FIX 2 — Retry fallback: no longer silently re-calls same function; shows proper error
+  FIX 3 — Logo extraction: tested path + clearer status feedback
+  FIX 4 — Batch workers: configurable via sidebar slider (1–6), default 3
 """
 
 import json, os, io, csv, re, time, tempfile, threading, queue, hashlib, zipfile, shutil
@@ -53,7 +30,8 @@ except ImportError:
 from extractor import extract_invoice
 from database import (
     init_db, save_invoice, get_all_invoices, get_invoice_by_id,
-    check_duplicate, get_vendor_summary, get_all_invoices_for_export
+    check_duplicate, get_vendor_summary, get_all_invoices_for_export,
+    update_invoice_risk_level,   # ← FIX 1: new DB function needed (see note below)
 )
 
 # ── DB Init ───────────────────────────────────────────────────────────────────
@@ -71,11 +49,10 @@ st.set_page_config(page_title="TrackBook", page_icon="📒", layout="wide")
 params = st.query_params
 dark_mode = params.get("dark", "0") == "1"
 
-# ── Mobile detection ──────────────────────────────────────────────────────────
 import streamlit.components.v1 as _st_comp
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CSS — light + dark + mobile + print + accessibility + animations
+# CSS — unchanged from v2.0
 # ══════════════════════════════════════════════════════════════════════════════
 LIGHT = {
     "bg_app":      "#F4F5F7",
@@ -143,14 +120,12 @@ st.markdown(f"""
     background: var(--bg-app) !important;
   }}
 
-  /* ── Kill Streamlit chrome ── */
   #MainMenu, footer, header,
   [data-testid="stToolbar"],
   [data-testid="stDecoration"],
   [data-testid="stStatusWidget"],
   .viewerBadge_container__r5tak {{ display: none !important; visibility: hidden !important; }}
 
-  /* ── Sidebar ── */
   [data-testid="stSidebar"] {{
     background: var(--bg-white) !important;
     border-right: 1px solid var(--border) !important;
@@ -167,10 +142,8 @@ st.markdown(f"""
     border-color: var(--primary-bd) !important;
   }}
 
-  /* ── Main content ── */
   .block-container {{ padding: 1.5rem 2rem 3rem !important; max-width: 1300px !important; }}
 
-  /* ── File uploader ── */
   [data-testid="stFileUploader"] > div,
   [data-testid="stFileUploaderDropzone"],
   [data-testid="stFileUploaderDropzone"] > div {{
@@ -189,7 +162,6 @@ st.markdown(f"""
   [data-testid="stFileUploader"] small,
   [data-testid="stFileUploader"] p {{ color: var(--text3) !important; background: transparent !important; }}
 
-  /* ── Inputs ── */
   [data-baseweb="input"], [data-baseweb="base-input"] {{
     background: var(--bg-white) !important;
     border: 1px solid var(--border2) !important;
@@ -214,7 +186,6 @@ st.markdown(f"""
     border: 1px solid var(--border2) !important; border-radius: 8px !important;
   }}
 
-  /* ── Select ── */
   [data-baseweb="select"] > div, [data-baseweb="select"] [data-baseweb="control"] {{
     background: var(--bg-white) !important;
     border-color: var(--border2) !important;
@@ -226,7 +197,6 @@ st.markdown(f"""
   [data-baseweb="menu"] li {{ color: var(--text) !important; }}
   [data-baseweb="menu"] li:hover {{ background: var(--primary-bg) !important; }}
 
-  /* ── Buttons ── */
   .stButton > button[kind="primary"], [data-testid="baseButton-primary"] {{
     background: var(--primary) !important; color: #FFFFFF !important;
     border: none !important; border-radius: 8px !important;
@@ -248,7 +218,6 @@ st.markdown(f"""
     background: var(--bg-soft) !important; border-color: var(--text4) !important;
   }}
 
-  /* ── Focus / Accessibility ── */
   button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible,
   [role="tab"]:focus-visible {{
     outline: 2px solid var(--primary) !important;
@@ -256,7 +225,6 @@ st.markdown(f"""
     box-shadow: 0 0 0 4px rgba(26,86,232,0.18) !important;
   }}
 
-  /* ── Form ── */
   [data-testid="stForm"] {{
     background: var(--bg-white) !important;
     border: 1px solid var(--border) !important;
@@ -270,7 +238,6 @@ st.markdown(f"""
     padding: 12px 22px !important; width: 100% !important;
   }}
 
-  /* ── Tabs ── */
   [data-testid="stTabs"] [role="tablist"] {{
     background: var(--bg-white) !important;
     border-bottom: 1px solid var(--border) !important;
@@ -293,7 +260,6 @@ st.markdown(f"""
     border-radius: 0 0 12px 12px !important; padding: 1.5rem !important;
   }}
 
-  /* ── Expander ── */
   [data-testid="stExpander"], .streamlit-expanderHeader, details > summary {{
     background: var(--bg-soft) !important;
     border: 1px solid var(--border) !important;
@@ -306,7 +272,6 @@ st.markdown(f"""
     border-radius: 0 0 8px 8px !important; padding: 1rem !important;
   }}
 
-  /* ── Dataframe ── */
   [data-testid="stDataFrame"] {{
     border-radius: 10px !important; overflow: hidden !important;
     border: 1px solid var(--border) !important;
@@ -320,7 +285,6 @@ st.markdown(f"""
   [data-testid="stDataFrame"] tbody td {{ color: var(--text) !important; font-size: 0.875rem !important; }}
   [data-testid="stDataFrame"] tbody tr:hover {{ background: var(--bg-soft) !important; }}
 
-  /* ── Metrics ── */
   [data-testid="stMetric"] {{
     background: var(--bg-white) !important;
     border: 1px solid var(--border) !important;
@@ -334,17 +298,14 @@ st.markdown(f"""
     font-size: 1.35rem !important; font-weight: 700 !important; color: var(--text) !important;
   }}
 
-  /* ── Alerts ── */
   [data-testid="stAlert"] {{
     border-radius: 8px !important; font-size: 0.875rem !important;
     background: var(--bg-soft) !important;
   }}
 
-  /* ── Progress bar ── */
   [data-testid="stProgressBar"] {{ background: var(--border) !important; border-radius: 4px !important; }}
   [data-testid="stProgressBar"] > div > div {{ background: var(--primary) !important; border-radius: 4px !important; }}
 
-  /* ── Camera ── */
   [data-testid="stCameraInput"] > div {{
     border: 1.5px dashed var(--border2) !important;
     border-radius: 10px !important; background: var(--bg-soft) !important;
@@ -354,7 +315,6 @@ st.markdown(f"""
     border-radius: 8px !important; border: none !important; font-weight: 600 !important;
   }}
 
-  /* ── Labels ── */
   label, .stTextInput label, .stNumberInput label, .stSelectbox label,
   [data-testid="stWidgetLabel"] {{
     color: var(--text2) !important; font-size: 0.875rem !important; font-weight: 500 !important;
@@ -363,13 +323,11 @@ st.markdown(f"""
 
   hr {{ border: none !important; border-top: 1px solid var(--border) !important; margin: 1rem 0 !important; }}
 
-  /* ── Hide rogue nav ── */
   [data-testid="stSidebarNavItems"],
   [data-testid="stSidebarNavSeparator"],
   [data-testid="stSearchBox"],
   [data-testid="stSidebar"] nav button {{ display: none !important; }}
 
-  /* ── Loading animation ── */
   @keyframes pulse-soft {{
     0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }}
   }}
@@ -383,7 +341,6 @@ st.markdown(f"""
     animation: spin 0.7s linear infinite; display: inline-block;
   }}
 
-  /* ── TrackBook component classes ── */
   .tb-brand {{
     padding: 1rem 1.25rem 0.875rem;
     font-size: 1.05rem; font-weight: 700; letter-spacing: -0.3px;
@@ -476,7 +433,6 @@ st.markdown(f"""
     font-size: 0.82rem; color: #15803D; margin-bottom: 0.75rem;
   }}
 
-  /* ── Thumbnail grid ── */
   .tb-thumb-grid {{
     display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 0.75rem; margin-bottom: 1rem;
@@ -492,7 +448,6 @@ st.markdown(f"""
     color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }}
 
-  /* ── Progress dashboard ── */
   .tb-progress-dash {{
     background: var(--bg-soft); border: 1px solid var(--border);
     border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
@@ -512,7 +467,6 @@ st.markdown(f"""
     transition: width 0.3s ease;
   }}
 
-  /* ── Version footer ── */
   .tb-footer {{
     position: fixed; bottom: 0; left: 0; right: 0;
     background: var(--bg-white); border-top: 1px solid var(--border);
@@ -521,7 +475,6 @@ st.markdown(f"""
     z-index: 999;
   }}
 
-  /* ══ MOBILE ══════════════════════════════════════════════ */
   @media (max-width: 768px) {{
     .block-container {{ padding: 0.75rem 0.75rem 4rem !important; }}
     .tb-metric-strip {{ gap: 0.5rem; }}
@@ -533,7 +486,6 @@ st.markdown(f"""
     .tb-thumb-grid {{ grid-template-columns: repeat(auto-fill, minmax(100px,1fr)); }}
   }}
 
-  /* ══ PRINT ═══════════════════════════════════════════════ */
   @media print {{
     [data-testid="stSidebar"],
     [data-testid="stToolbar"],
@@ -747,7 +699,7 @@ for k, v in {
         st.session_state[k] = v
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SIDEBAR
+# ▶▶ FIX 4 — SIDEBAR with configurable workers slider
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("""
@@ -757,7 +709,6 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     st.caption(f"Signed in as **{st.session_state.get('username','user')}**")
 
-    # Dark mode toggle
     dm_label = "☀️ Light mode" if dark_mode else "🌙 Dark mode"
     if st.button(dm_label, use_container_width=True):
         new_val = "0" if dark_mode else "1"
@@ -770,7 +721,17 @@ with st.sidebar:
 
     st.divider()
 
-    # Cache controls
+    # ── FIX 4: Configurable batch workers ────────────────────────────────
+    st.markdown('<div style="font-size:0.78rem;font-weight:600;color:var(--text3);margin-bottom:4px">⚙️ Batch processing</div>', unsafe_allow_html=True)
+    BATCH_WORKERS = st.slider(
+        "Parallel workers",
+        min_value=1, max_value=6, value=3,
+        help="How many invoices to process simultaneously. Higher = faster but uses more API quota."
+    )
+    st.caption(f"Processing {BATCH_WORKERS} file(s) at a time")
+
+    st.divider()
+
     with st.expander("🗂 Cache"):
         cache_files = list(_CACHE_DIR.glob("*.png"))
         st.caption(f"{len(cache_files)} cached items")
@@ -814,12 +775,19 @@ def field_card(label: str, value, score: str = None) -> str:
             f'<div class="tb-field-label">{label}{conf_dot}</div>'
             f'{v_html}{bar_html}</div>')
 
-# ── Logo extraction (with cache) ──────────────────────────────────────────────
-def extract_logo(file_bytes: bytes, media_type: str) -> bytes | None:
+# ══════════════════════════════════════════════════════════════════════════════
+# ▶▶ FIX 3 — LOGO EXTRACTION with status feedback
+# ══════════════════════════════════════════════════════════════════════════════
+def extract_logo(file_bytes: bytes, media_type: str) -> tuple[bytes | None, str]:
+    """
+    Returns (logo_bytes_or_None, status_message)
+    Status can be: 'cached', 'extracted', 'no_logo', 'error'
+    FIX 3: Now returns a status so callers can show informative feedback.
+    """
     h = _file_hash(file_bytes)
     cached = _load_logo_from_cache(h)
     if cached is not None:
-        return cached
+        return cached, "cached"
 
     import base64 as _b64
     import anthropic
@@ -832,13 +800,13 @@ def extract_logo(file_bytes: bytes, media_type: str) -> bytes | None:
             from pdf2image import convert_from_bytes
             pages = convert_from_bytes(file_bytes, first_page=1, last_page=1, dpi=150)
             if not pages:
-                return None
+                return None, "error"
             buf = io.BytesIO()
             pages[0].save(buf, format="PNG")
             working_bytes = buf.getvalue()
             working_mt    = "image/png"
-        except Exception:
-            return None
+        except Exception as e:
+            return None, f"error: pdf2image failed — {e}"
 
     def _call():
         client = anthropic.Anthropic()
@@ -864,7 +832,7 @@ def extract_logo(file_bytes: bytes, media_type: str) -> bytes | None:
                 raw = raw[4:]
         info = json.loads(raw)
         if not info.get("has_logo"):
-            return None
+            return None, "no_logo"
         from PIL import Image
         img = Image.open(io.BytesIO(working_bytes)).convert("RGBA")
         w, h_img = img.size
@@ -879,12 +847,12 @@ def extract_logo(file_bytes: bytes, media_type: str) -> bytes | None:
             logo.save(buf, format="PNG")
             logo_bytes = buf.getvalue()
             _save_logo_to_cache(h, logo_bytes)
-            return logo_bytes
+            return logo_bytes, "extracted"
+        return None, "no_logo"
     except ClaudeAPIError as e:
-        st.warning(f"⚠️ Logo extraction: {e.error_type} — {e}")
-    except Exception:
-        pass
-    return None
+        return None, f"error: {e.error_type} — {e}"
+    except Exception as e:
+        return None, f"error: {e}"
 
 def render_logo_header(vendor_name: str, logo_bytes: bytes | None):
     initials = "".join(w[0].upper() for w in (vendor_name or "??").split()[:2])
@@ -978,6 +946,36 @@ def enhanced_fraud_flags(data: dict) -> list[str]:
             flags.append(f"Unusually high quantity ({qty}) for: {item.get('description','?')}")
     return flags
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ▶▶ FIX 1 — UNIFIED RISK LEVEL COMPUTATION
+# This single function is now the ONE place that decides the final risk level.
+# It's used both when saving (so DB gets the upgraded level) and when displaying.
+# ══════════════════════════════════════════════════════════════════════════════
+def compute_final_risk_level(data: dict) -> str:
+    """
+    Combines Claude's risk level with rule-based flags to produce
+    the final, authoritative risk level. This is now used everywhere —
+    at save-time (written to DB) and at display-time — so they always match.
+    """
+    fraud = data.get("fraud_flags") or {}
+    claude_risk = fraud.get("risk_level", "low")
+
+    extra_flags = enhanced_fraud_flags(data) + canadian_tax_flags(data)
+
+    # Upgrade logic: rules can only raise the risk, never lower it
+    risk_order = {"low": 0, "medium": 1, "high": 2}
+    final_risk = claude_risk
+
+    if extra_flags:
+        # Any rule flags at all → at least medium
+        if risk_order.get(final_risk, 0) < risk_order["medium"]:
+            final_risk = "medium"
+        # 3 or more rule flags → high
+        if len(extra_flags) >= 3 and risk_order.get(final_risk, 0) < risk_order["high"]:
+            final_risk = "high"
+
+    return final_risk
+
 def is_valid_invoice(data: dict) -> tuple[bool, str]:
     doc_type = data.get("document_type", "invoice")
     if doc_type not in ("invoice", "receipt", "credit_note", "bill"):
@@ -992,20 +990,37 @@ def is_valid_invoice(data: dict) -> tuple[bool, str]:
         return False, f"{null_critical}/4 key fields missing with low confidence."
     return True, ""
 
-def render_fraud_section(fraud: dict, extra_flags: list[str] | None = None):
-    fraud = fraud or {}
-    risk  = fraud.get("risk_level", "low")
-    flags = list(fraud.get("flags", [])) + (extra_flags or [])
-    math  = fraud.get("math_check", {})
-    if extra_flags and risk == "low": risk = "medium"
-    if fraud.get("is_suspicious") or risk in ("medium","high") or flags:
-        items_html = "".join(f'<div class="tb-fraud-item">• {f}</div>' for f in flags) or '<div class="tb-fraud-item">Flagged as suspicious</div>'
-        st.markdown(f'<div class="tb-fraud-box"><div class="tb-fraud-title">🚨 Fraud analysis — {risk_badge(risk)}</div>{items_html}</div>', unsafe_allow_html=True)
+def render_fraud_section(data: dict):
+    """
+    FIX 1: Now takes the full data dict and calls compute_final_risk_level()
+    so display always uses the same logic as what's saved to DB.
+    """
+    fraud = data.get("fraud_flags") or {}
+    flags = list(fraud.get("flags", []))
+    extra_flags = enhanced_fraud_flags(data) + canadian_tax_flags(data)
+    all_flags = flags + extra_flags
+
+    # Use the unified function — same as what gets saved to DB
+    final_risk = compute_final_risk_level(data)
+
+    math = fraud.get("math_check", {})
+
+    if fraud.get("is_suspicious") or final_risk in ("medium", "high") or all_flags:
+        items_html = "".join(f'<div class="tb-fraud-item">• {f}</div>' for f in all_flags) or \
+                     '<div class="tb-fraud-item">Flagged as suspicious</div>'
+        st.markdown(
+            f'<div class="tb-fraud-box">'
+            f'<div class="tb-fraud-title">🚨 Fraud analysis — {risk_badge(final_risk)}</div>'
+            f'{items_html}</div>',
+            unsafe_allow_html=True
+        )
     else:
         st.markdown('<div class="tb-ok-box">✓ No fraud indicators detected</div>', unsafe_allow_html=True)
+
     if math and not math.get("matches", True):
         e, a = math.get("expected_total"), math.get("actual_total")
-        if e and a: st.warning(f"⚠️ Math check: expected {e}, invoice shows {a}")
+        if e and a:
+            st.warning(f"⚠️ Math check: expected {e}, invoice shows {a}")
 
 def render_field_scores(scores: dict, data: dict):
     m = data.get("invoice_meta", {}); v = data.get("vendor", {}); b = data.get("buyer", {})
@@ -1039,18 +1054,20 @@ def render_invoice(data: dict, invoice_id: int = None, editable: bool = False,
 
     render_logo_header(v.get("name"), logo_bytes)
 
+    # FIX 1: Use unified risk level for display header too
+    final_risk = compute_final_risk_level(data)
+
     h1,h2,h3,h4 = st.columns(4)
     h1.markdown(f"**Confidence** {conf_badge(conf.get('overall','low'))}", unsafe_allow_html=True)
     h2.markdown(f"**Type** `{data.get('document_type','invoice')}`")
-    h3.markdown(f"**Fraud** {risk_badge((fraud or {}).get('risk_level','low'))}", unsafe_allow_html=True)
+    h3.markdown(f"**Fraud** {risk_badge(final_risk)}", unsafe_allow_html=True)
     if invoice_id: h4.markdown(_badge(f"✓ Saved #{invoice_id}", "blue"), unsafe_allow_html=True)
 
     flagged = conf.get("flagged_fields", [])
     if flagged: st.warning(f"Flagged: {', '.join(flagged)}")
 
     st.divider()
-    extra = enhanced_fraud_flags(data) + canadian_tax_flags(data)
-    render_fraud_section(fraud, extra_flags=extra or None)
+    render_fraud_section(data)   # FIX 1: pass full data, not just fraud sub-dict
 
     if editable:
         st.markdown("**✏️ Edit fields before saving**")
@@ -1134,15 +1151,13 @@ def build_zip_export(invoice_ids: list[int]) -> bytes:
     return buf.getvalue()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BATCH PROCESSOR
+# ▶▶ FIX 1 + FIX 2 + FIX 3 — BATCH PROCESSOR
 # ══════════════════════════════════════════════════════════════════════════════
-BATCH_WORKERS = 3
-
 def _process_single(uploaded_file, do_logo: bool, do_save: bool,
                     tracker: ProgressTracker | None = None) -> dict:
     name = uploaded_file.name
     result = {"name": name, "status": "error", "data": None,
-              "logo_bytes": None, "invoice_id": None,
+              "logo_bytes": None, "logo_status": None, "invoice_id": None,
               "error": None, "dup": None, "rejected": None, "thumb": None}
 
     suffix = os.path.splitext(name)[1].lower()
@@ -1150,20 +1165,40 @@ def _process_single(uploaded_file, do_logo: bool, do_save: bool,
 
     if tracker: tracker.update(name, 10, "processing", "Reading file…")
 
-    # PDF thumbnail
     if suffix == ".pdf":
         result["thumb"] = get_pdf_thumbnail(file_bytes)
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(file_bytes); tmp_path = tmp.name
+
         if tracker: tracker.update(name, 30, "processing", "Extracting…")
+
+        # ── FIX 2: Clean error handling — no silent re-call fallback ──────
         try:
             data = _wrap_api_call(extract_invoice, tmp_path)
         except ClaudeAPIError as e:
-            st.warning(f"⚠️ {name}: Claude API {e.error_type} — {e}")
-            data = extract_invoice(tmp_path)   # fallback without retry wrapper
-        os.unlink(tmp_path)
+            # Show exactly what went wrong; don't silently retry with same call
+            error_messages = {
+                "rate_limit": "API rate limit reached — please wait a moment and try again.",
+                "timeout":    "Request timed out — the invoice may be too complex or the API is busy.",
+                "connection": "Could not connect to Claude API — check your internet connection.",
+                "api_error":  "Claude API returned an error — check your API key and quota.",
+            }
+            friendly = error_messages.get(e.error_type, f"API error: {e}")
+            result["error"] = friendly
+            os.unlink(tmp_path)
+            if tracker: tracker.update(name, 100, "error")
+            return result
+        except Exception as e:
+            result["error"] = f"Extraction failed: {e}"
+            os.unlink(tmp_path)
+            if tracker: tracker.update(name, 100, "error")
+            return result
+        finally:
+            try: os.unlink(tmp_path)
+            except Exception: pass
+
     except Exception as e:
         result["error"] = str(e)
         if tracker: tracker.update(name, 100, "error")
@@ -1180,22 +1215,36 @@ def _process_single(uploaded_file, do_logo: bool, do_save: bool,
     dup = check_duplicate(inv_num) if inv_num else None
     result["dup"] = dup
 
+    # ── FIX 3: Logo extraction with status feedback ───────────────────────
     if do_logo:
         if tracker: tracker.update(name, 70, "processing", "Logo…")
         mt_map = {".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",
                   ".webp":"image/webp",".pdf":"application/pdf"}
         media_type = mt_map.get(suffix, "image/png")
         try:
-            result["logo_bytes"] = extract_logo(file_bytes, media_type)
-        except Exception: pass
+            logo_bytes, logo_status = extract_logo(file_bytes, media_type)
+            result["logo_bytes"]  = logo_bytes
+            result["logo_status"] = logo_status
+        except Exception as e:
+            result["logo_status"] = f"error: {e}"
 
-    result["data"] = data; result["status"] = "extracted"
+    result["data"] = data
+
+    # ── FIX 1: Compute unified risk level BEFORE saving to DB ────────────
+    final_risk = compute_final_risk_level(data)
+    # Write it back into the data dict so save_invoice() picks it up
+    if "fraud_flags" not in data or data["fraud_flags"] is None:
+        data["fraud_flags"] = {}
+    data["fraud_flags"]["risk_level"] = final_risk
+
+    result["status"] = "extracted"
 
     if do_save and not dup:
         if tracker: tracker.update(name, 88, "processing", "Saving…")
         try:
-            iid = save_invoice(data)
-            result["invoice_id"] = iid; result["status"] = "saved"
+            iid = save_invoice(data)    # now saves the upgraded risk_level
+            result["invoice_id"] = iid
+            result["status"] = "saved"
         except Exception as e:
             result["error"] = f"Save failed: {e}"
 
@@ -1207,7 +1256,6 @@ def render_batch_results(results: list[dict], edit_mode: bool):
     for r in results:
         icon = {"saved":"✅","extracted":"📄","rejected":"🚫","error":"❌"}.get(r["status"],"❓")
         with st.expander(f"{icon} {r['name']}", expanded=(r["status"] not in ("saved",))):
-            # PDF thumbnail
             if r.get("thumb"):
                 st.image(r["thumb"], width=120, caption="Page 1 preview")
 
@@ -1217,6 +1265,18 @@ def render_batch_results(results: list[dict], edit_mode: bool):
                 st.error(f"Error: {r['error']}"); continue
 
             data = r["data"]
+
+            # ── FIX 3: Show logo extraction status ────────────────────────
+            logo_status = r.get("logo_status")
+            if logo_status == "extracted":
+                st.success("🖼 Logo extracted successfully")
+            elif logo_status == "cached":
+                st.info("🖼 Logo loaded from cache")
+            elif logo_status == "no_logo":
+                st.caption("🖼 No logo detected in this document")
+            elif logo_status and logo_status.startswith("error"):
+                st.warning(f"🖼 Logo extraction skipped: {logo_status}")
+
             if r["dup"]:
                 dup = r["dup"]
                 st.markdown(
@@ -1263,7 +1323,7 @@ with tab_extract:
     st.markdown("""
     <div style="margin-bottom:1.25rem">
       <div class="tb-page-title">Extract invoices</div>
-      <div class="tb-page-sub">Upload any number of invoices — processed 3 at a time with fraud &amp; tax analysis.</div>
+      <div class="tb-page-sub">Upload any number of invoices — processed in parallel with fraud &amp; tax analysis.</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1322,8 +1382,8 @@ with tab_extract:
                         result = future.result()
                     except Exception as e:
                         result = {"name": f.name, "status": "error", "error": str(e),
-                                  "data": None, "logo_bytes": None, "invoice_id": None,
-                                  "dup": None, "rejected": None, "thumb": None}
+                                  "data": None, "logo_bytes": None, "logo_status": None,
+                                  "invoice_id": None, "dup": None, "rejected": None, "thumb": None}
                     all_results.append(result)
                     completed_count += 1
                     dash_slot.markdown(tracker.render_html(), unsafe_allow_html=True)
@@ -1345,7 +1405,6 @@ with tab_extract:
                 f'{_badge(f"✗ {errors} errors","red") if errors else ""}'
                 f'</div>', unsafe_allow_html=True)
 
-            # ZIP export for this batch
             saved_ids = [r["invoice_id"] for r in all_results if r.get("invoice_id")]
             if saved_ids:
                 zip_bytes = build_zip_export(saved_ids)
@@ -1405,19 +1464,35 @@ with tab_scan:
                 tmp.write(file_bytes); tmp_path = tmp.name
             try:
                 data = _wrap_api_call(extract_invoice, tmp_path)
+
+            # ── FIX 2: Scan tab also gets clean error messages ────────────
             except ClaudeAPIError as e:
-                st.warning(f"⚠️ API {e.error_type}: retrying… {e}")
-                data = extract_invoice(tmp_path)
+                error_messages = {
+                    "rate_limit": "Rate limit reached — please wait a moment and try again.",
+                    "timeout":    "Request timed out — try again with better lighting.",
+                    "connection": "Cannot connect to Claude API — check your internet.",
+                    "api_error":  "API error — check your key and quota.",
+                }
+                st.error(f"❌ {error_messages.get(e.error_type, str(e))}")
+                data = None
             except Exception as e:
-                st.error(f"Extraction failed: {e}"); data = None
+                st.error(f"Extraction failed: {e}")
+                data = None
             finally:
-                os.unlink(tmp_path)
+                try: os.unlink(tmp_path)
+                except Exception: pass
 
         if data:
             valid, reason = is_valid_invoice(data)
             if not valid:
                 st.error(f"❌ Rejected: {reason}")
             else:
+                # FIX 1: Apply unified risk level before saving
+                final_risk = compute_final_risk_level(data)
+                if "fraud_flags" not in data or data["fraud_flags"] is None:
+                    data["fraud_flags"] = {}
+                data["fraud_flags"]["risk_level"] = final_risk
+
                 st.divider()
                 if st.session_state.scan_edit:
                     data = render_invoice(data, editable=True, key_prefix="scan")
@@ -1437,7 +1512,7 @@ with tab_scan:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — HISTORY
+# TAB 3 — HISTORY (unchanged)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_history:
     st.markdown('<div class="tb-page-title">Invoice history</div>', unsafe_allow_html=True)
@@ -1490,7 +1565,6 @@ with tab_history:
     else:
         st.caption(f"{len(rows)} invoice(s)")
 
-        # ── Batch ZIP export from history ─────────────────────────────────
         all_ids = [r["id"] for r in rows]
         col_sel1, col_sel2, col_zip = st.columns([1,1,2])
         with col_sel1:
@@ -1557,7 +1631,7 @@ with tab_history:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — SUMMARY
+# TAB 4 — SUMMARY (unchanged)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_summary:
     st.markdown('<div class="tb-page-title">Vendor spend summary</div>', unsafe_allow_html=True)
@@ -1604,7 +1678,6 @@ with tab_summary:
         df = pd.DataFrame(summary)
         df["total_spend"] = df["total_spend"].astype(float)
 
-        # ── Spend chart ────────────────────────────────────────────────────
         st.markdown('<div class="tb-section-head">Spend by vendor (top 15)</div>', unsafe_allow_html=True)
         chart_df = (df[["vendor_name","total_spend"]]
                     .set_index("vendor_name")
@@ -1612,7 +1685,6 @@ with tab_summary:
                     .head(15))
         st.bar_chart(chart_df, use_container_width=True, height=280)
 
-        # ── Risk analysis — cards only, no broken chart ────────────────────
         try:
             all_inv = get_all_invoices_for_export()
             if all_inv:
@@ -1665,7 +1737,7 @@ with tab_summary:
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="tb-footer">
-  <span>TrackBook v2.0 · NxtWave</span>
+  <span>TrackBook v2.1 · NxtWave</span>
   <span>Invoice Intelligence Engine · Claude-powered</span>
   <span>© 2025</span>
 </div>
