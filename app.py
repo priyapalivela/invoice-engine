@@ -31,7 +31,7 @@ from extractor import extract_invoice
 from database import (
     init_db, save_invoice, get_all_invoices, get_invoice_by_id,
     check_duplicate, get_vendor_summary, get_all_invoices_for_export,
-    update_invoice_risk_level,   # ← FIX 1: new DB function needed (see note below)
+    #update_invoice_risk_level,   # ← FIX 1: new DB function needed (see note below)
 )
 
 # ── DB Init ───────────────────────────────────────────────────────────────────
