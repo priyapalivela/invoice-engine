@@ -1,5 +1,5 @@
 """
-TrackBook — Invoice Intelligence Engine
+TractBook — Invoice Intelligence Engine
 NxtWave · nxtwave.ca
 
 FIXES APPLIED (v2.1):
@@ -43,7 +43,7 @@ except Exception as e:
     db_error = str(e)
 
 # ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="TrackBook", page_icon="📒", layout="wide")
+st.set_page_config(page_title="TractBook", page_icon="📒", layout="wide")
 
 # ── Dark mode via query param ─────────────────────────────────────────────────
 params = st.query_params
@@ -536,7 +536,7 @@ def _wrap_api_call(fn, *args, **kwargs):
 # ══════════════════════════════════════════════════════════════════════════════
 # LOGO CACHE
 # ══════════════════════════════════════════════════════════════════════════════
-_CACHE_DIR = Path(tempfile.gettempdir()) / "trackbook_logo_cache"
+_CACHE_DIR = Path(tempfile.gettempdir()) / "tractbook_logo_cache"
 _CACHE_DIR.mkdir(exist_ok=True)
 _CACHE_TTL_DAYS = 7
 
@@ -664,7 +664,7 @@ def check_auth():
               <div style="font-size:1.5rem;font-weight:800;letter-spacing:-0.5px;color:var(--text)">
                 <span style="display:inline-block;width:10px;height:10px;background:var(--primary);
                   border-radius:50%;margin-right:6px;vertical-align:middle"></span>
-                TrackBook
+                TractBook
               </div>
               <div style="font-size:0.82rem;color:var(--text3);margin-top:4px">Invoice Intelligence · NxtWave</div>
             </div>
@@ -704,7 +704,7 @@ for k, v in {
 with st.sidebar:
     st.markdown("""
     <div class="tb-brand">
-      <span class="tb-brand-dot"></span> TrackBook
+      <span class="tb-brand-dot"></span> TractBook
     </div>
     """, unsafe_allow_html=True)
     st.caption(f"Signed in as **{st.session_state.get('username','user')}**")
@@ -1412,7 +1412,7 @@ with tab_extract:
                 st.download_button(
                     f"⬇ Download batch ZIP ({len(saved_ids)} invoices)",
                     data=zip_bytes,
-                    file_name=f"trackbook_batch_{ts}.zip",
+                    file_name=f"tractbook_batch_{ts}.zip",
                     mime="application/zip",
                     key=f"batch_zip_{ts}",
                 )
@@ -1558,7 +1558,7 @@ with tab_history:
                 writer.writeheader()
                 writer.writerows([{k: str(v) if v is not None else "" for k,v in r.items()} for r in export_rows])
                 st.download_button("⬇ Export CSV", data=out.getvalue(),
-                    file_name="trackbook_export.csv", mime="text/csv")
+                    file_name="tractbook_export.csv", mime="text/csv")
 
     if not rows:
         st.info("No invoices found.")
@@ -1587,7 +1587,7 @@ with tab_history:
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 st.download_button(
                     f"⬇ ZIP {len(selected)} invoice(s)",
-                    data=zip_bytes, file_name=f"trackbook_{ts}.zip",
+                    data=zip_bytes, file_name=f"tractbook_{ts}.zip",
                     mime="application/zip", key=f"hist_zip_{ts}",
                 )
 
@@ -1737,7 +1737,7 @@ with tab_summary:
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="tb-footer">
-  <span>TrackBook v2.1 · NxtWave</span>
+  <span>TractBook v2.1 · NxtWave</span>
   <span>Invoice Intelligence Engine · Claude-powered</span>
   <span>© 2025</span>
 </div>
