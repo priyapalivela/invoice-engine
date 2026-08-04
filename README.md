@@ -55,10 +55,10 @@ OCR
 ## Screenshots
 
 ### Spend Summary Dashboard
-![Spend Summary](docs/screenshots/Summary_dashboard.png)
+![Spend Summary](docs/screenshots/Summary_dashboard.jpg)
 
 ### AI-Powered Invoice Extraction
-![Extract Invoice](docs/screenshots/Extract_Invoice.png)
+![Extract Invoice](docs/screenshots/Extract_Invoice.jpg)
 
 ### Batch Export
 ![ZIP Export](docs/screenshots/Zip_Export.png)
