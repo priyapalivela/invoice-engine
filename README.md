@@ -52,6 +52,18 @@ Pillow
 OCR
 
 ---
+## Screenshots
+
+### Spend Summary Dashboard
+![Spend Summary](docs/screenshots/Summary_dashboard.png)
+
+### AI-Powered Invoice Extraction
+![Extract Invoice](docs/screenshots/Extract_Invoice.png)
+
+### Batch Export
+![ZIP Export](docs/screenshots/Zip_Export.png)
+
+---
 
 ## Live Demo
 https://invoice-engine-ggn9jmwkffnyetgubnzh4s.streamlit.app/
