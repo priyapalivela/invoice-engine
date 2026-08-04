@@ -651,7 +651,10 @@ class ProgressTracker:
 # ══════════════════════════════════════════════════════════════════════════════
 # AUTH
 # ══════════════════════════════════════════════════════════════════════════════
-USERS = {os.getenv("AUTH_USER", "admin"): os.getenv("AUTH_PASS", "invoice123")}
+USERS = {
+    os.getenv("AUTH_USER", "admin"): os.getenv("AUTH_PASS", "invoice@123"),
+    os.getenv("DEMO_USER", "demo"):  os.getenv("DEMO_PASS", "Demo@123"),
+}
 
 def check_auth():
     if "authenticated" not in st.session_state:
@@ -676,6 +679,9 @@ def check_auth():
                     if USERS.get(username) == password:
                         st.session_state.authenticated = True
                         st.session_state.username = username
+                        st.session_state.role = (
+                            "admin" if username == os.getenv("AUTH_USER", "admin") else "demo"
+                        )
                         st.rerun()
                     else:
                         st.error("Invalid credentials")
@@ -693,6 +699,7 @@ for k, v in {
     "scan_save":     True,
     "authenticated": False,
     "username":      None,
+    "role":          None,
     "zip_selected":  [],
 }.items():
     if k not in st.session_state:
@@ -708,6 +715,8 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     st.caption(f"Signed in as **{st.session_state.get('username','user')}**")
+    if st.session_state.get("role") == "demo":
+        st.markdown('<span class="tb-badge tb-badge-amber">Demo account</span>', unsafe_allow_html=True)
 
     dm_label = "☀️ Light mode" if dark_mode else "🌙 Dark mode"
     if st.button(dm_label, use_container_width=True):
@@ -735,9 +744,12 @@ with st.sidebar:
     with st.expander("🗂 Cache"):
         cache_files = list(_CACHE_DIR.glob("*.png"))
         st.caption(f"{len(cache_files)} cached items")
-        if st.button("🧹 Clean cache", use_container_width=True):
-            removed = clean_logo_cache()
-            st.success(f"Removed {removed} expired items")
+        if st.session_state.get("role") == "admin":
+            if st.button("🧹 Clean cache", use_container_width=True):
+                removed = clean_logo_cache()
+                st.success(f"Removed {removed} expired items")
+        else:
+            st.caption("Demo account: cache management disabled.")
 
     st.divider()
     if db_ok:
@@ -1283,7 +1295,9 @@ def render_batch_results(results: list[dict], edit_mode: bool):
                     f'<div class="tb-dup-box">⚠️ <b>Duplicate:</b> Invoice already exists as '
                     f'DB #{dup["id"]} — {dup["vendor_name"]}, total {dup["grand_total"]}</div>',
                     unsafe_allow_html=True)
-                if st.button("Save anyway", key=f"force_{r['name']}", type="secondary") and db_ok:
+                if (st.session_state.get("role") == "admin"
+                        and st.button("Save anyway", key=f"force_{r['name']}", type="secondary")
+                        and db_ok):
                     try:
                         iid = save_invoice(data); r["invoice_id"] = iid
                         st.success(f"✓ Force-saved as #{iid}")
@@ -1296,7 +1310,9 @@ def render_batch_results(results: list[dict], edit_mode: bool):
 
             if edit_mode:
                 data = render_invoice(data, editable=True, logo_bytes=r["logo_bytes"], key_prefix=r["name"])
-                if st.button(f"💾 Confirm & Save", key=f"esave_{r['name']}") and db_ok:
+                if (st.session_state.get("role") == "admin"
+                        and st.button(f"💾 Confirm & Save", key=f"esave_{r['name']}")
+                        and db_ok):
                     try:
                         iid = save_invoice(data); st.success(f"✓ Saved #{iid}")
                     except Exception as e:
@@ -1333,8 +1349,11 @@ with tab_extract:
         em_col = "#1A56E8" if st.session_state.edit_mode else "#6B7280"
         em_bd  = "#C7D2FE" if st.session_state.edit_mode else "#E5E7EB"
         st.markdown(f'<div style="background:{em_bg};border:1px solid {em_bd};border-radius:8px;padding:8px 14px;font-size:0.82rem;font-weight:600;color:{em_col};margin-bottom:4px">{"✏️ Edit mode: ON" if st.session_state.edit_mode else "✏️ Edit mode: OFF"}</div>', unsafe_allow_html=True)
-        if st.button("Toggle edit mode", key="toggle_edit", use_container_width=True):
-            st.session_state.edit_mode = not st.session_state.edit_mode; st.rerun()
+        if st.session_state.get("role") == "admin":
+            if st.button("Toggle edit mode", key="toggle_edit", use_container_width=True):
+                st.session_state.edit_mode = not st.session_state.edit_mode; st.rerun()
+        else:
+            st.caption("Demo account: editing disabled.")
     with oc2:
         as_bg  = "#DCFCE7" if st.session_state.auto_save else "#F9FAFB"
         as_col = "#15803D" if st.session_state.auto_save else "#6B7280"
@@ -1447,8 +1466,9 @@ with tab_scan:
             se_col = "#1A56E8" if st.session_state.scan_edit else "#6B7280"
             se_bd  = "#C7D2FE" if st.session_state.scan_edit else "#E5E7EB"
             st.markdown(f'<div style="background:{se_bg};border:1px solid {se_bd};border-radius:8px;padding:7px 12px;font-size:0.82rem;font-weight:600;color:{se_col};margin-bottom:4px">{"✏️ Edit mode: ON" if st.session_state.scan_edit else "✏️ Edit mode: OFF"}</div>', unsafe_allow_html=True)
-            if st.button("Toggle edit", key="scan_edit_btn", use_container_width=True):
-                st.session_state.scan_edit = not st.session_state.scan_edit; st.rerun()
+            if st.session_state.get("role") == "admin":
+                if st.button("Toggle edit", key="scan_edit_btn", use_container_width=True):
+                    st.session_state.scan_edit = not st.session_state.scan_edit; st.rerun()
             ss_bg  = "#DCFCE7" if st.session_state.scan_save else "#F9FAFB"
             ss_col = "#15803D" if st.session_state.scan_save else "#6B7280"
             ss_bd  = "#BBF7D0" if st.session_state.scan_save else "#E5E7EB"
@@ -1496,7 +1516,7 @@ with tab_scan:
                 st.divider()
                 if st.session_state.scan_edit:
                     data = render_invoice(data, editable=True, key_prefix="scan")
-                    if st.button("💾 Confirm & Save scan", key="scan_confirm"):
+                    if st.session_state.get("role") == "admin" and st.button("💾 Confirm & Save scan", key="scan_confirm"):
                         if db_ok and st.session_state.scan_save:
                             try:
                                 iid = save_invoice(data); st.success(f"✓ Saved — DB ID #{iid}")
