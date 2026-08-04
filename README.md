@@ -1,5 +1,4 @@
-# TractBook – Intelligent Invoice Extraction Engine
-
+# TractBook – AI Invoice Intelligence Platform
 ## Overview
 
 TractBook is an AI-powered invoice intelligence platform that extracts structured information from invoices using Claude AI. The application supports invoice history, batch processing, fraud analysis, spending analytics, and CSV export through an interactive Streamlit interface.
