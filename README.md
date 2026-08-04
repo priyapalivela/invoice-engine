@@ -54,5 +54,14 @@ OCR
 ---
 
 ## Live Demo
-
 https://invoice-engine-ggn9jmwkffnyetgubnzh4s.streamlit.app/
+
+### Demo Credentials
+Try it out with a read-only demo account — editing, saving, and deleting are disabled to protect the sample data:
+Username: demo
+Password: Demo@123
+
+
+Upload invoices, run batch extraction, and explore the spend summary dashboard freely.
+
+---
