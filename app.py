@@ -497,6 +497,33 @@ st.markdown(f"""
     }}
     .tb-field {{ break-inside: avoid; }}
   }}
+
+  /* ── FIX: captions invisible ─────────────────────────────── */
+  [data-testid="stCaptionContainer"],
+  [data-testid="stCaptionContainer"] *,
+  [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{
+    color: var(--text3) !important;
+    opacity: 1 !important;
+  }}
+
+  /* ── FIX: Upload button text invisible ───────────────────── */
+  [data-testid="stFileUploader"] button,
+  [data-testid="stFileUploaderDropzone"] button,
+  [data-testid="stFileUploader"] button *,
+  [data-testid="stFileUploaderDropzone"] button * {{
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+    background-color: transparent;
+  }}
+  [data-testid="stFileUploader"] button,
+  [data-testid="stFileUploaderDropzone"] button {{
+    background: var(--primary) !important;
+  }}
+  [data-testid="stFileUploader"] button svg,
+  [data-testid="stFileUploaderDropzone"] button svg {{
+    fill: #FFFFFF !important;
+    color: #FFFFFF !important;
+  
 </style>
 """, unsafe_allow_html=True)
 
