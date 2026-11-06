@@ -652,7 +652,7 @@ class ProgressTracker:
 # AUTH
 # ══════════════════════════════════════════════════════════════════════════════
 USERS = {
-    os.getenv("AUTH_USER", "admin"): os.getenv("AUTH_PASS", "invoice@123"),
+    os.getenv("AUTH_USER", "*****"): os.getenv("AUTH_PASS", "*****"),
     os.getenv("DEMO_USER", "demo"):  os.getenv("DEMO_PASS", "Demo@123"),
 }
 
@@ -685,6 +685,20 @@ def check_auth():
                         st.rerun()
                     else:
                         st.error("Invalid credentials")
+
+      # ── NEW: demo hint + one-click demo login ──────────────────
+            st.markdown(
+                '<div style="text-align:center;font-size:0.8rem;color:var(--text3);margin:0.75rem 0 0.5rem">'
+                'Just exploring? Demo account: <b>demo</b> / <b>Demo@123</b> (read-only)'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button("👀 Try the demo", use_container_width=True, key="demo_login"):
+                st.session_state.authenticated = True
+                st.session_state.username = os.getenv("DEMO_USER", "demo")
+                st.session_state.role = "demo"
+                st.rerun()
+            # ───────────────────────────────────────────────────────────
         st.stop()
 
 check_auth()
